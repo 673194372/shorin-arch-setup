@@ -69,9 +69,10 @@ if [ "$CN_MIRROR" == "1" ] || [ "$DEBUG" == "1" ]; then
     
     log "Enabling China Optimizations..."
     
-    # [MODIFIED] Using Tsinghua Mirror (TUNA)
-    log "-> Switching Flathub to Tsinghua Mirror..."
-    exe flatpak remote-modify flathub --url=https://mirror.tuna.tsinghua.edu.cn/flathub
+    # [MODIFIED] SJTU Mirror + No P2P
+    log "-> Switching Flathub to SJTU Mirror..."
+    exe flatpak remote-modify flathub --url=https://mirror.sjtu.edu.cn/flathub
+    exe flatpak remote-modify --no-p2p flathub
     
     export GOPROXY=https://goproxy.cn,direct
     if ! grep -q "GOPROXY" /etc/environment; then echo "GOPROXY=https://goproxy.cn,direct" >> /etc/environment; fi
@@ -172,7 +173,7 @@ if [ -d "$DOTFILES_SOURCE" ]; then
     log "Deploying KDE configurations..."
     
     BACKUP_NAME="config_backup_kde_$(date +%s).tar.gz"
-    log "Backing up ~/.config to $BACKUP_NAME..."
+    log "Backing up ~/.config..."
     exe runuser -u "$TARGET_USER" -- tar -czf "$HOME_DIR/$BACKUP_NAME" -C "$HOME_DIR" .config
     
     log "Copying files..."

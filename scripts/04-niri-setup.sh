@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# 04-niri-setup.sh - Niri Desktop (Visual Enhanced v7.3)
+# 04-niri-setup.sh - Niri Desktop (Visual Enhanced)
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -75,7 +75,7 @@ if [ "$SKIP_AUTOLOGIN" = false ]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 1. Install Niri & Essentials (+ Firefox Policy)
+# 1. Install Niri & Essentials
 # ------------------------------------------------------------------------------
 section "Step 1/9" "Core Components"
 
@@ -167,9 +167,10 @@ if [ "$CN_MIRROR" == "1" ] || [ "$DEBUG" == "1" ]; then
     
     log "Enabling China Optimizations..."
     
-    # [MODIFIED] Using Tsinghua Mirror (TUNA)
-    log "-> Switching Flathub to Tsinghua Mirror..."
-    exe flatpak remote-modify flathub --url=https://mirror.tuna.tsinghua.edu.cn/flathub
+    # [MODIFIED] Switch to SJTU Mirror & Disable P2P
+    log "-> Switching Flathub to SJTU Mirror..."
+    exe flatpak remote-modify flathub --url=https://mirror.sjtu.edu.cn/flathub
+    exe flatpak remote-modify --no-p2p flathub
     
     export GOPROXY=https://goproxy.cn,direct
     if ! grep -q "GOPROXY" /etc/environment; then
@@ -178,6 +179,8 @@ if [ "$CN_MIRROR" == "1" ] || [ "$DEBUG" == "1" ]; then
     
     log "Enabling Git Mirror..."
     exe runuser -u "$TARGET_USER" -- git config --global url."https://gitclone.com/github.com/".insteadOf "https://github.com/"
+    
+    success "Optimizations Enabled."
 else
     log "Using Global Sources."
 fi
@@ -238,7 +241,7 @@ if [ -f "$LIST_FILE" ]; then
             log "Phase 2: Git Install..."
             for git_pkg in "${GIT_LIST[@]}"; do
                 if ! exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
-                    warn "Install failed. Retrying..."
+                    warn "Retrying $git_pkg..."
                     
                     if runuser -u "$TARGET_USER" -- git config --global --get url."https://gitclone.com/github.com/".insteadOf > /dev/null; then
                         runuser -u "$TARGET_USER" -- git config --global --unset url."https://gitclone.com/github.com/".insteadOf
@@ -247,11 +250,8 @@ if [ -f "$LIST_FILE" ]; then
                     fi
                     
                     if ! exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
-                        
                         warn "Checking local cache..."
-                        if install_local_fallback "$git_pkg"; then
-                            :
-                        else
+                        if install_local_fallback "$git_pkg"; then :; else
                             error "Failed: $git_pkg"
                             FAILED_PACKAGES+=("$git_pkg")
                         fi
@@ -321,11 +321,24 @@ if [ -d "$TEMP_DIR/dotfiles" ]; then
     exe runuser -u "$TARGET_USER" -- cp -rf "$TEMP_DIR/dotfiles/." "$HOME_DIR/"
     success "Dotfiles applied."
     
+    # Clean non-shorin config
     if [ "$TARGET_USER" != "shorin" ]; then
         OUTPUT_KDL="$HOME_DIR/.config/niri/output.kdl"
         if [ -f "$OUTPUT_KDL" ]; then
             log "Clearing output.kdl..."
             exe runuser -u "$TARGET_USER" -- truncate -s 0 "$OUTPUT_KDL"
+        fi
+        
+        EXCLUDE_FILE="$PARENT_DIR/exclude-dotfiles.txt"
+        if [ -f "$EXCLUDE_FILE" ]; then
+            log "Removing user-specific configs..."
+            mapfile -t EXCLUDES < <(grep -vE "^\s*#|^\s*$" "$EXCLUDE_FILE" | tr -d '\r')
+            for item in "${EXCLUDES[@]}"; do
+                item=$(echo "$item" | xargs)
+                [ -z "$item" ] && continue
+                REMOVE_TARGET="$HOME_DIR/.config/$item"
+                if [ -d "$REMOVE_TARGET" ]; then exe rm -rf "$REMOVE_TARGET"; fi
+            done
         fi
     fi
 
@@ -392,9 +405,8 @@ SERVICE_FILE="$USER_SYSTEMD_DIR/niri-autostart.service"
 if [ "$SKIP_AUTOLOGIN" = true ]; then
     log "Auto-login skipped (Reason: $DM_FOUND or User Opt-out)."
     
-    # [CLEANUP] Remove any existing hijack configs
     if [ -f "$LINK_PATH" ] || [ -f "$SERVICE_FILE" ]; then
-        warn "Removing old auto-login services to prevent session hijacking..."
+        warn "Removing old auto-login services..."
         exe rm -f "$LINK_PATH"
         exe rm -f "$SERVICE_FILE"
         success "Cleanup successful."
