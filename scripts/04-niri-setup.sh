@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# 04-niri-setup.sh - Niri Desktop (Visual Enhanced & Portal Fix)
+# 04-niri-setup.sh - Niri Desktop (Visual Enhanced v9.0)
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,28 +54,50 @@ HOME_DIR="/home/$TARGET_USER"
 info_kv "Target" "$TARGET_USER"
 
 # ------------------------------------------------------------------------------
-# [SAFETY CHECK] Detect Existing Display Managers
+# [LOGIC] Auto-Login Decision Matrix (Pacman-based Detection)
 # ------------------------------------------------------------------------------
-log "Checking Display Managers..."
+log "Checking for installed Display Managers..."
 
-DMS=("gdm" "sddm" "lightdm" "lxdm" "ly")
+# Standard DM package names in Arch Linux
+KNOWN_DMS=(
+    "gdm" "sddm" "lightdm" "lxdm" "slim" "xorg-xdm"  # Graphical
+    "ly" "greetd" "emptty" "lemurs" "console-tdm"    # Console/TUI
+)
+
 SKIP_AUTOLOGIN=false
+DM_FOUND=""
 
-for dm in "${DMS[@]}"; do
-    if systemctl is-enabled "$dm.service" &>/dev/null; then
-        info_kv "DM Detected" "$dm" "${H_YELLOW}(Active)${NC}"
-        warn "TTY auto-login configuration will be SKIPPED."
-        SKIP_AUTOLOGIN=true
+# Check if any DM package is installed using pacman -Q
+for dm in "${KNOWN_DMS[@]}"; do
+    if pacman -Q "$dm" &>/dev/null; then
+        DM_FOUND="$dm"
         break
     fi
 done
 
-if [ "$SKIP_AUTOLOGIN" = false ]; then
-    log "No active DM. TTY auto-login will be configured."
+if [ -n "$DM_FOUND" ]; then
+    # Case A: DM Package Installed -> Force Skip
+    info_kv "Conflict" "${H_RED}$DM_FOUND${NC}" "Package detected"
+    warn "To prevent conflicts with $DM_FOUND, TTY auto-login will be DISABLED."
+    SKIP_AUTOLOGIN=true
+else
+    # Case B: No DM Package -> Ask User
+    info_kv "DM Check" "None" "No Display Manager installed"
+    echo ""
+    read -p "$(echo -e "   ${H_CYAN}Do you want to enable TTY auto-login for Niri? [Y/n] ${NC}")" choice
+    choice=${choice:-Y}
+    
+    if [[ ! "$choice" =~ ^[Yy]$ ]]; then
+        log "User opted out. Auto-login disabled."
+        SKIP_AUTOLOGIN=true
+    else
+        log "Will configure TTY auto-login in final step."
+        SKIP_AUTOLOGIN=false
+    fi
 fi
 
 # ------------------------------------------------------------------------------
-# 1. Install Niri & Essentials
+# 1. Install Niri & Essentials (+ Firefox Policy)
 # ------------------------------------------------------------------------------
 section "Step 1/9" "Core Components"
 
@@ -84,7 +106,7 @@ log "Installing Niri & Essentials..."
 PKGS="niri xwayland-satellite xdg-desktop-portal-gnome fuzzel kitty firefox libnotify mako polkit-gnome pciutils"
 exe pacman -Syu --noconfirm --needed $PKGS
 
-# Firefox Policy
+# Firefox Policy (Pywalfox)
 log "Configuring Firefox Policies..."
 FIREFOX_POLICY_DIR="/etc/firefox/policies"
 exe mkdir -p "$FIREFOX_POLICY_DIR"
@@ -106,14 +128,12 @@ exe chmod 644 "$FIREFOX_POLICY_DIR/policies.json"
 success "Firefox policy applied."
 
 # ------------------------------------------------------------------------------
-# 1.1 [NEW] Configure XDG Portals (Fix for SDDM/KDE Crash)
+# 1.1 Configure XDG Portals (Fix for SDDM/KDE Crash)
 # ------------------------------------------------------------------------------
 log "Configuring XDG Desktop Portals..."
 
-# Ensure we force GNOME portal for Niri to prevent conflicts with KDE/Hyprland portals
 PORTAL_CONF_DIR="$HOME_DIR/.config/xdg-desktop-portal"
 exe runuser -u "$TARGET_USER" -- mkdir -p "$PORTAL_CONF_DIR"
-
 PORTAL_CONF="$PORTAL_CONF_DIR/niri-portals.conf"
 
 cat <<EOT > "/tmp/niri-portals.conf"
@@ -125,7 +145,7 @@ EOT
 
 exe cp "/tmp/niri-portals.conf" "$PORTAL_CONF"
 exe chown "$TARGET_USER:$TARGET_USER" "$PORTAL_CONF"
-success "Portal priority configured (niri-portals.conf)."
+success "Portal priority configured."
 
 # ------------------------------------------------------------------------------
 # 2. File Manager (Nautilus) Setup
@@ -319,6 +339,7 @@ if [ -d "$TEMP_DIR/dotfiles" ]; then
     
     log "Applying dotfiles..."
     exe runuser -u "$TARGET_USER" -- cp -rf "$TEMP_DIR/dotfiles/." "$HOME_DIR/"
+    success "Dotfiles applied."
     
     if [ "$TARGET_USER" != "shorin" ]; then
         OUTPUT_KDL="$HOME_DIR/.config/niri/output.kdl"
@@ -350,6 +371,7 @@ WALL_DEST="$HOME_DIR/Pictures/Wallpapers"
 if [ -d "$TEMP_DIR/wallpapers" ]; then
     exe runuser -u "$TARGET_USER" -- mkdir -p "$WALL_DEST"
     exe runuser -u "$TARGET_USER" -- cp -rf "$TEMP_DIR/wallpapers/." "$WALL_DEST/"
+    success "Wallpapers installed."
 fi
 rm -rf "$TEMP_DIR"
 
@@ -364,6 +386,8 @@ gpasswd -a "$TARGET_USER" i2c
 exe pacman -Syu --noconfirm --needed swayosd
 systemctl enable --now swayosd-libinput-backend.service > /dev/null 2>&1
 
+success "Hardware tools configured."
+
 # ------------------------------------------------------------------------------
 # Cleanup
 # ------------------------------------------------------------------------------
@@ -373,15 +397,31 @@ rm -f "$SUDO_TEMP_FILE"
 runuser -u "$TARGET_USER" -- git config --global --unset url."https://gitclone.com/github.com/".insteadOf
 sed -i '/GOPROXY=https:\/\/goproxy.cn,direct/d' /etc/environment
 
+success "Cleanup done."
+
 # ------------------------------------------------------------------------------
-# 10. Auto-Login
+# 10. Auto-Login (Anti-Hijack Mode)
 # ------------------------------------------------------------------------------
 section "Final" "Boot Config"
 
+USER_SYSTEMD_DIR="$HOME_DIR/.config/systemd/user"
+WANTS_DIR="$USER_SYSTEMD_DIR/default.target.wants"
+LINK_PATH="$WANTS_DIR/niri-autostart.service"
+SERVICE_FILE="$USER_SYSTEMD_DIR/niri-autostart.service"
+
 if [ "$SKIP_AUTOLOGIN" = true ]; then
-    log "Auto-login skipped (DM active)."
+    log "Auto-login skipped (Reason: $DM_FOUND or User Opt-out)."
+    
+    # [CLEANUP] Remove any existing hijack configs
+    if [ -f "$LINK_PATH" ] || [ -f "$SERVICE_FILE" ]; then
+        warn "Removing old auto-login services to prevent session hijacking..."
+        exe rm -f "$LINK_PATH"
+        exe rm -f "$SERVICE_FILE"
+        success "Cleanup successful."
+    fi
 else
     log "Configuring TTY Auto-login..."
+    
     GETTY_DIR="/etc/systemd/system/getty@tty1.service.d"
     mkdir -p "$GETTY_DIR"
     cat <<EOT > "$GETTY_DIR/autologin.conf"
@@ -390,9 +430,8 @@ ExecStart=
 ExecStart=-/sbin/agetty --noreset --noclear --autologin $TARGET_USER - \${TERM}
 EOT
 
-    USER_SYSTEMD_DIR="$HOME_DIR/.config/systemd/user"
-    mkdir -p "$USER_SYSTEMD_DIR"
-    cat <<EOT > "$USER_SYSTEMD_DIR/niri-autostart.service"
+    exe mkdir -p "$USER_SYSTEMD_DIR"
+    cat <<EOT > "$SERVICE_FILE"
 [Unit]
 Description=Niri Session Autostart
 After=graphical-session-pre.target
@@ -405,11 +444,10 @@ Restart=on-failure
 WantedBy=default.target
 EOT
 
-    WANTS_DIR="$USER_SYSTEMD_DIR/default.target.wants"
-    mkdir -p "$WANTS_DIR"
-    ln -sf "../niri-autostart.service" "$WANTS_DIR/niri-autostart.service"
+    exe mkdir -p "$WANTS_DIR"
+    exe ln -sf "../niri-autostart.service" "$LINK_PATH"
     
-    chown -R "$TARGET_USER:$TARGET_USER" "$HOME_DIR/.config/systemd"
+    exe chown -R "$TARGET_USER:$TARGET_USER" "$HOME_DIR/.config/systemd"
     success "Auto-login configured."
 fi
 
