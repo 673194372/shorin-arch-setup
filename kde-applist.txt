@@ -1,0 +1,12 @@
+fish
+eza
+fastfetch
+imagemagick
+thefuck
+starship
+zoxide
+jq
+kwin-effects-geometry-change
+kwin-effect-rounded-corners-git
+ark
+kate

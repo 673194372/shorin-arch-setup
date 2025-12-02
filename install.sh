@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# Shorin Arch Setup - Main Installer (v3.4)
+# Shorin Arch Setup - Main Installer (v4.0)
 # ==============================================================================
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,14 +15,14 @@ else
     exit 1
 fi
 
-# --- Environment Propagation ---
+# --- Environment ---
 export DEBUG=${DEBUG:-0}
 export CN_MIRROR=${CN_MIRROR:-0}
 
 check_root
 chmod +x "$SCRIPTS_DIR"/*.sh
 
-# --- ASCII Banners ---
+# --- Banner Functions ---
 banner1() {
 cat << "EOF"
    _____ __  ______  ____  _____   __
@@ -32,7 +32,6 @@ cat << "EOF"
 /____/_/ /_/\____/_/ |_/___/_/ |_/   
 EOF
 }
-
 banner2() {
 cat << "EOF"
   ██████  ██   ██  ██████  ██████  ██ ███    ██ 
@@ -42,7 +41,6 @@ cat << "EOF"
   ██████  ██   ██  ██████  ██   ██ ██ ██   ████ 
 EOF
 }
-
 banner3() {
 cat << "EOF"
    ______ __ __   ___   ____   ____  _   _ 
@@ -65,14 +63,52 @@ show_banner() {
         2) banner3 ;;
     esac
     echo -e "${NC}"
-    echo -e "${DIM}   :: Arch Linux Automation Protocol :: v3.4 ::${NC}"
+    echo -e "${DIM}   :: Arch Linux Automation Protocol :: v4.0 ::${NC}"
     echo ""
+}
+
+# --- Desktop Selection Menu ---
+select_desktop() {
+    show_banner
+    echo -e "${H_PURPLE}╭──────────────────────────────────────────────────────────────╮${NC}"
+    echo -e "${H_PURPLE}│${NC} ${BOLD}Choose your Desktop Environment:${NC}                             ${H_PURPLE}│${NC}"
+    echo -e "${H_PURPLE}│${NC}                                                              ${H_PURPLE}│${NC}"
+    echo -e "${H_PURPLE}│${NC}  ${H_CYAN}[1]${NC} Niri (Wayland Tiling Compositor)                       ${H_PURPLE}│${NC}"
+    echo -e "${H_PURPLE}│${NC}  ${H_CYAN}[2]${NC} KDE Plasma 6 (Full Desktop Environment)                ${H_PURPLE}│${NC}"
+    echo -e "${H_PURPLE}│${NC}                                                              ${H_PURPLE}│${NC}"
+    echo -e "${H_PURPLE}╰──────────────────────────────────────────────────────────────╯${NC}"
+    echo ""
+    
+    echo -e "   ${DIM}Waiting for input (Timeout: 2 mins)...${NC}"
+    read -t 120 -p "$(echo -e "   ${H_YELLOW}Select [1/2]: ${NC}")" dt_choice
+    
+    if [ -z "$dt_choice" ]; then
+        echo -e "\n${H_RED}Timeout or no selection.${NC}"
+        exit 1
+    fi
+    
+    case "$dt_choice" in
+        1)
+            export DESKTOP_ENV="niri"
+            log "Selected: Niri"
+            ;;
+        2)
+            export DESKTOP_ENV="kde"
+            log "Selected: KDE Plasma"
+            ;;
+        *)
+            error "Invalid selection."
+            exit 1
+            ;;
+    esac
+    sleep 1
 }
 
 sys_dashboard() {
     echo -e "${H_BLUE}╔════ SYSTEM DIAGNOSTICS ══════════════════════════════╗${NC}"
     echo -e "${H_BLUE}║${NC} ${BOLD}Kernel${NC}   : $(uname -r)"
     echo -e "${H_BLUE}║${NC} ${BOLD}User${NC}     : $(whoami)"
+    echo -e "${H_BLUE}║${NC} ${BOLD}Desktop${NC}  : ${H_MAGENTA}${DESKTOP_ENV^^}${NC}"
     
     if [ "$CN_MIRROR" == "1" ]; then
         echo -e "${H_BLUE}║${NC} ${BOLD}Network${NC}  : ${H_YELLOW}CN Optimized (Manual)${NC}"
@@ -86,28 +122,34 @@ sys_dashboard() {
         done_count=$(wc -l < "$STATE_FILE")
         echo -e "${H_BLUE}║${NC} ${BOLD}Progress${NC} : Resuming ($done_count modules done)"
     fi
-    
     echo -e "${H_BLUE}╚══════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
 
 # --- Main Execution ---
 
+select_desktop
+clear
 show_banner
 sys_dashboard
 
-MODULES=(
+# Dynamic Module List
+BASE_MODULES=(
     "01-base.sh"
     "02-musthave.sh"
     "03-user.sh"
-    "04-niri-setup.sh"
-    "07-grub-theme.sh"
-    "99-apps.sh"
 )
 
-if [ ! -f "$STATE_FILE" ]; then
-    touch "$STATE_FILE"
+if [ "$DESKTOP_ENV" == "niri" ]; then
+    BASE_MODULES+=("04-niri-setup.sh")
+elif [ "$DESKTOP_ENV" == "kde" ]; then
+    BASE_MODULES+=("06-kdeplasma-setup.sh")
 fi
+
+BASE_MODULES+=("07-grub-theme.sh" "99-apps.sh")
+MODULES=("${BASE_MODULES[@]}")
+
+if [ ! -f "$STATE_FILE" ]; then touch "$STATE_FILE"; fi
 
 TOTAL_STEPS=${#MODULES[@]}
 CURRENT_STEP=0
@@ -115,10 +157,8 @@ CURRENT_STEP=0
 log "Initializing installer sequence..."
 sleep 0.5
 
-# --- [NEW] Global System Update ---
+# Global Update
 section "Pre-Flight" "System Synchronization"
-log "Ensuring system is up-to-date before starting..."
-
 if exe pacman -Syu --noconfirm; then
     success "System Updated."
 else
@@ -126,7 +166,6 @@ else
     exit 1
 fi
 
-# --- Module Loop ---
 for module in "${MODULES[@]}"; do
     CURRENT_STEP=$((CURRENT_STEP + 1))
     script_path="$SCRIPTS_DIR/$module"
@@ -142,14 +181,7 @@ for module in "${MODULES[@]}"; do
         echo -e "   ${H_GREEN}✔${NC} Module previously completed."
         read -p "$(echo -e "   ${H_YELLOW}Skip this module? [Y/n] ${NC}")" skip_choice
         skip_choice=${skip_choice:-Y}
-        
-        if [[ "$skip_choice" =~ ^[Yy]$ ]]; then
-            log "Skipping..."
-            continue
-        else
-            log "Force re-running..."
-            sed -i "/^${module}$/d" "$STATE_FILE"
-        fi
+        if [[ "$skip_choice" =~ ^[Yy]$ ]]; then log "Skipping..."; continue; else log "Force re-running..."; sed -i "/^${module}$/d" "$STATE_FILE"; fi
     fi
 
     bash "$script_path"
@@ -163,60 +195,41 @@ for module in "${MODULES[@]}"; do
         echo -e "${H_RED}║ Module '$module' failed with exit code $exit_code.${NC}"
         echo -e "${H_RED}║ Check log: $TEMP_LOG_FILE${NC}"
         echo -e "${H_RED}╚══════════════════════════════════════════════════════╝${NC}"
-        write_log "FATAL" "Module $module failed with exit code $exit_code"
+        write_log "FATAL" "Module $module failed"
         exit 1
     fi
 done
 
-# --- Completion & Log Archiving ---
-
+# Completion
 clear
 show_banner
-
 echo -e "${H_GREEN}╔══════════════════════════════════════════════════════╗${NC}"
 echo -e "${H_GREEN}║             INSTALLATION  COMPLETE                   ║${NC}"
 echo -e "${H_GREEN}╚══════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-# Cleanup State
-if [ -f "$STATE_FILE" ]; then
-    rm "$STATE_FILE"
-fi
+if [ -f "$STATE_FILE" ]; then rm "$STATE_FILE"; fi
 
-# --- Archive Log ---
-log "Archiving installation log..."
+log "Archiving log..."
 FINAL_USER=$(awk -F: '$3 == 1000 {print $1}' /etc/passwd)
-
 if [ -n "$FINAL_USER" ]; then
     FINAL_DOCS="/home/$FINAL_USER/Documents"
-    FINAL_LOG="$FINAL_DOCS/log-shorin-arch-setup.txt"
-    
     mkdir -p "$FINAL_DOCS"
-    cp "$TEMP_LOG_FILE" "$FINAL_LOG"
+    cp "$TEMP_LOG_FILE" "$FINAL_DOCS/log-shorin-arch-setup.txt"
     chown -R "$FINAL_USER:$FINAL_USER" "$FINAL_DOCS"
-    
-    echo -e "   ${H_BLUE}●${NC} Log Saved     : ${BOLD}$FINAL_LOG${NC}"
-else
-    warn "Could not determine user. Log remains at $TEMP_LOG_FILE"
+    echo -e "   ${H_BLUE}●${NC} Log Saved     : ${BOLD}$FINAL_DOCS/log-shorin-arch-setup.txt${NC}"
 fi
 
 echo ""
-echo -e "${H_YELLOW}>>> System requires a REBOOT to initialize services.${NC}"
-
-# --- [FIX] Clear Input Buffer ---
-# This prevents leftover Enter keys from skipping the countdown
+echo -e "${H_YELLOW}>>> System requires a REBOOT.${NC}"
 while read -r -t 0; do read -r; done
-
 for i in {10..1}; do
-    echo -ne "\r   ${DIM}Auto-rebooting in ${i} seconds... (Press 'n' to cancel)${NC}"
+    echo -ne "\r   ${DIM}Auto-rebooting in ${i}s... (Press 'n' to cancel)${NC}"
     read -t 1 -N 1 input
     if [[ "$input" == "n" || "$input" == "N" ]]; then
         echo -e "\n\n   ${H_BLUE}>>> Reboot cancelled.${NC}"
-        echo -e "   Type ${BOLD}reboot${NC} when you are ready."
         exit 0
     fi
 done
-
-echo -e "\n\n   ${H_GREEN}>>> Rebooting system...${NC}"
-# Use systemctl reboot for better compatibility
+echo -e "\n\n   ${H_GREEN}>>> Rebooting...${NC}"
 systemctl reboot

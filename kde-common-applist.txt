@@ -1,11 +1,7 @@
-# --- System Packages (Yay/Pacman) ---
-steam
-mpv
-linuxqq-appimage
-wechat-appimage
-fragments
-typora-free
-btop
+mission-center
+gwenview
+kcalc
+pacman-contrib
 gnome-disk-utility
 dosfstools
 ntfs-3g
@@ -14,9 +10,12 @@ f2fs-tools
 udftools
 xfsprogs
 baobab
+haruna
+ksystemlog 
+btop
+linuxqq-appimage
+wechat-appimage
 
-# --- Flatpak Packages (Prefix with flatpak:) ---
-flatpak:io.github.fabrialberio.pinapp
 flatpak:it.mijorus.gearlever
 flatpak:com.obsproject.Studio
 flatpak:com.github.wwmm.easyeffects

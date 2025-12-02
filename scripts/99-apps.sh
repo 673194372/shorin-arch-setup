@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# 99-apps.sh - Common Applications Installation (Visual Enhanced v5.0)
+# 99-apps.sh - Common Applications (Multi-Desktop Aware)
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,7 +10,6 @@ source "$SCRIPT_DIR/00-utils.sh"
 
 check_root
 
-# --- Interrupt Handler ---
 trap 'echo -e "\n   ${H_YELLOW}>>> Operation cancelled by user (Ctrl+C). Skipping current item...${NC}"' INT
 
 # ------------------------------------------------------------------------------
@@ -30,15 +29,22 @@ HOME_DIR="/home/$TARGET_USER"
 info_kv "Target" "$TARGET_USER"
 
 # ------------------------------------------------------------------------------
-# 1. User Confirmation
+# 1. List Selection & Confirmation
 # ------------------------------------------------------------------------------
+# [MODIFIED] Select list based on Desktop Environment
+if [ "$DESKTOP_ENV" == "kde" ]; then
+    LIST_FILENAME="kde-common-applist.txt"
+else
+    LIST_FILENAME="common-applist.txt"
+fi
+
 echo ""
-echo -e "   This module reads from: ${BOLD}common-applist.txt${NC}"
+echo -e "   Selected List: ${BOLD}$LIST_FILENAME${NC} (Based on $DESKTOP_ENV)"
 echo -e "   Format: ${DIM}lines starting with 'flatpak:' use Flatpak, others use Yay.${NC}"
 echo -e "   ${H_YELLOW}Tip: Press Ctrl+C during any install to SKIP that package.${NC}"
 echo ""
 
-read -p "$(echo -e "   ${H_CYAN}Install common applications? [Y/n] ${NC}")" choice
+read -p "$(echo -e "   ${H_CYAN}Install these applications? [Y/n] ${NC}")" choice
 choice=${choice:-Y}
 
 if [[ ! "$choice" =~ ^[Yy]$ ]]; then
@@ -52,7 +58,7 @@ fi
 # ------------------------------------------------------------------------------
 log "Parsing application list..."
 
-LIST_FILE="$PARENT_DIR/common-applist.txt"
+LIST_FILE="$PARENT_DIR/$LIST_FILENAME"
 YAY_APPS=()
 FLATPAK_APPS=()
 FAILED_PACKAGES=()
@@ -72,7 +78,7 @@ if [ -f "$LIST_FILE" ]; then
     
     info_kv "Queue" "Yay: ${#YAY_APPS[@]}" "Flatpak: ${#FLATPAK_APPS[@]}"
 else
-    warn "File common-applist.txt not found. Skipping."
+    warn "File $LIST_FILENAME not found. Skipping."
     trap - INT
     exit 0
 fi
@@ -93,7 +99,6 @@ if [ ${#YAY_APPS[@]} -gt 0 ]; then
     BATCH_LIST="${YAY_APPS[*]}"
     log "Attempting batch install..."
     
-    # Attempt Batch (Using exe for visual feedback)
     # [FIX] yay -S -> yay -Syu
     exe runuser -u "$TARGET_USER" -- yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST
     batch_ret=$?
@@ -110,7 +115,6 @@ if [ ${#YAY_APPS[@]} -gt 0 ]; then
     if [ $batch_ret -ne 0 ]; then
         for pkg in "${YAY_APPS[@]}"; do
             # Attempt 1
-            # [FIX] cmd -> exe, yay -S -> yay -Syu
             if ! exe runuser -u "$TARGET_USER" -- yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$pkg"; then
                 ret=$?
                 if [ $ret -eq 130 ]; then
@@ -118,7 +122,6 @@ if [ ${#YAY_APPS[@]} -gt 0 ]; then
                     continue 
                 fi
                 
-                # Retry Attempt 2
                 warn "Retrying '$pkg'..."
                 if ! exe runuser -u "$TARGET_USER" -- yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$pkg"; then
                     ret_retry=$?
@@ -146,7 +149,6 @@ if [ ${#FLATPAK_APPS[@]} -gt 0 ]; then
     
     for app in "${FLATPAK_APPS[@]}"; do
         # Attempt 1
-        # [FIX] Wrapped in exe
         if ! exe flatpak install -y flathub "$app"; then
             ret=$?
             if [ $ret -eq 130 ]; then
@@ -158,7 +160,6 @@ if [ ${#FLATPAK_APPS[@]} -gt 0 ]; then
             sleep 3
             
             # Attempt 2
-            # [FIX] Wrapped in exe
             if ! exe flatpak install -y flathub "$app"; then
                 ret_retry=$?
                 if [ $ret_retry -eq 130 ]; then
@@ -185,7 +186,7 @@ if [ ${#FAILED_PACKAGES[@]} -gt 0 ]; then
     
     if [ ! -d "$DOCS_DIR" ]; then runuser -u "$TARGET_USER" -- mkdir -p "$DOCS_DIR"; fi
     
-    echo -e "\n--- Phase 5 (Common Apps) Failures ---" >> "$REPORT_FILE"
+    echo -e "\n--- Phase 5 (Common Apps - $DESKTOP_ENV) Failures ---" >> "$REPORT_FILE"
     printf "%s\n" "${FAILED_PACKAGES[@]}" >> "$REPORT_FILE"
     chown "$TARGET_USER:$TARGET_USER" "$REPORT_FILE"
     
@@ -206,7 +207,6 @@ NATIVE_DESKTOP="/usr/share/applications/steam.desktop"
 if [ -f "$NATIVE_DESKTOP" ]; then
     log "Checking Native Steam..."
     if ! grep -q "env LANG=zh_CN.UTF-8" "$NATIVE_DESKTOP"; then
-        # [FIX] Wrapped in exe
         exe sed -i 's|^Exec=/usr/bin/steam|Exec=env LANG=zh_CN.UTF-8 /usr/bin/steam|' "$NATIVE_DESKTOP"
         exe sed -i 's|^Exec=steam|Exec=env LANG=zh_CN.UTF-8 steam|' "$NATIVE_DESKTOP"
         success "Patched Native Steam .desktop."
@@ -219,7 +219,6 @@ fi
 # Method 2: Flatpak Steam
 if echo "${FLATPAK_APPS[@]}" | grep -q "com.valvesoftware.Steam" || flatpak list | grep -q "com.valvesoftware.Steam"; then
     log "Checking Flatpak Steam..."
-    # [FIX] Wrapped in exe
     exe flatpak override --env=LANG=zh_CN.UTF-8 com.valvesoftware.Steam
     success "Applied Flatpak Steam override."
     STEAM_desktop_modified=true
