@@ -13,9 +13,7 @@ check_root
 # ------------------------------------------------------------------------------
 # 0. Pre-check: Is GRUB installed?
 # ------------------------------------------------------------------------------
-# 检测 grub-mkconfig 命令是否存在，如果不存在说明不是 GRUB 环境
 if ! command -v grub-mkconfig >/dev/null 2>&1; then
-    # 使用 warn 而不是 error，因为这可能是有意的 (例如用户使用 systemd-boot)
     echo ""
     warn "GRUB (grub-mkconfig) not found on this system."
     log "Skipping GRUB theme installation."
@@ -38,9 +36,8 @@ if [ ! -d "$SOURCE_BASE" ]; then
     exit 0
 fi
 
-# 扫描有效的主题目录 (包含 theme.txt 的目录)
-# 使用数组存储路径和名称
-mapfile -t FOUND_DIRS < <(find "$SOURCE_BASE" -mindepth 1 -maxdepth 1 -type d)
+# [Fix] 使用 sort 确保每次运行顺序一致
+mapfile -t FOUND_DIRS < <(find "$SOURCE_BASE" -mindepth 1 -maxdepth 1 -type d | sort)
 THEME_PATHS=()
 THEME_NAMES=()
 
@@ -61,7 +58,6 @@ fi
 # 2. Select Theme (TUI Menu)
 # ------------------------------------------------------------------------------
 
-# 如果只有一个主题，直接选中，跳过菜单
 if [ ${#THEME_NAMES[@]} -eq 1 ]; then
     SELECTED_INDEX=0
     log "Only one theme detected. Auto-selecting: ${THEME_NAMES[0]}"
@@ -71,7 +67,6 @@ else
     MAX_LEN=${#TITLE_TEXT}
 
     for name in "${THEME_NAMES[@]}"; do
-        # 预估显示长度："[x] Name - Default" (大致增加 20 字符余量)
         ITEM_LEN=$((${#name} + 20))
         if (( ITEM_LEN > MAX_LEN )); then
             MAX_LEN=$ITEM_LEN
@@ -91,7 +86,7 @@ else
     # 顶部
     echo -e "${H_PURPLE}╭${LINE_STR}╮${NC}"
 
-    # 标题居中
+    # 标题
     TITLE_PADDING_LEN=$(( (MENU_WIDTH - ${#TITLE_TEXT}) / 2 ))
     RIGHT_PADDING_LEN=$((MENU_WIDTH - ${#TITLE_TEXT} - TITLE_PADDING_LEN))
     
@@ -106,9 +101,7 @@ else
         NAME="${THEME_NAMES[$i]}"
         DISPLAY_IDX=$((i+1))
         
-        COLOR_STR=""
-        RAW_STR=""
-
+        # 定义显示字符串
         if [ "$i" -eq 0 ]; then
             RAW_STR=" [$DISPLAY_IDX] $NAME - Default"
             COLOR_STR=" ${H_CYAN}[$DISPLAY_IDX]${NC} ${NAME} - ${H_GREEN}Default${NC}"
@@ -117,6 +110,7 @@ else
             COLOR_STR=" ${H_CYAN}[$DISPLAY_IDX]${NC} ${NAME}"
         fi
 
+        # 计算填充
         PADDING=$((MENU_WIDTH - ${#RAW_STR}))
         PAD_STR=""; 
         if [ "$PADDING" -gt 0 ]; then
@@ -130,14 +124,20 @@ else
     echo -e "${H_PURPLE}╰${LINE_STR}╯${NC}"
     echo ""
 
-    # --- 用户输入 ---
-    read -t 60 -p "$(echo -e "   ${H_YELLOW}Enter choice [1-${#THEME_NAMES[@]}]: ${NC}")" USER_CHOICE
-    if [ $? -ne 0 ]; then echo ""; fi # 处理超时换行
+    # --- [Fix] 修复 read 输入 ---
+    # 分开打印提示符和读取输入，避免ANSI颜色代码导致的 read 异常
+    echo -ne "   ${H_YELLOW}Enter choice [1-${#THEME_NAMES[@]}]: ${NC}"
+    read -t 60 USER_CHOICE
     
+    # 如果超时或直接回车，echo 一个换行符以免显示错乱
+    if [ -z "$USER_CHOICE" ]; then
+        echo "" 
+    fi
+
     # 默认值处理
     USER_CHOICE=${USER_CHOICE:-1}
 
-    # 验证输入有效性
+    # 验证
     if ! [[ "$USER_CHOICE" =~ ^[0-9]+$ ]] || [ "$USER_CHOICE" -lt 1 ] || [ "$USER_CHOICE" -gt "${#THEME_NAMES[@]}" ]; then
         log "Invalid choice or timeout. Defaulting to first option..."
         SELECTED_INDEX=0
@@ -146,7 +146,6 @@ else
     fi
 fi
 
-# 确定最终选择
 THEME_SOURCE="${THEME_PATHS[$SELECTED_INDEX]}"
 THEME_NAME="${THEME_NAMES[$SELECTED_INDEX]}"
 
@@ -157,18 +156,15 @@ info_kv "Selected" "$THEME_NAME"
 # ------------------------------------------------------------------------------
 log "Installing theme files..."
 
-# Ensure destination exists
 if [ ! -d "$DEST_DIR" ]; then
     exe mkdir -p "$DEST_DIR"
 fi
 
-# Clean install: Remove old if exists (only specifically the folder we are installing)
 if [ -d "$DEST_DIR/$THEME_NAME" ]; then
     log "Removing existing version..."
     exe rm -rf "$DEST_DIR/$THEME_NAME"
 fi
 
-# Copy
 exe cp -r "$THEME_SOURCE" "$DEST_DIR/"
 
 if [ -f "$DEST_DIR/$THEME_NAME/theme.txt" ]; then
@@ -187,24 +183,29 @@ GRUB_CONF="/etc/default/grub"
 THEME_PATH="$DEST_DIR/$THEME_NAME/theme.txt"
 
 if [ -f "$GRUB_CONF" ]; then
-    # Update or Append GRUB_THEME
+    # [Fix] 优先取消注释并修改，而不是无脑追加
+    # 1. 检查是否存在未注释的 GRUB_THEME
     if grep -q "^GRUB_THEME=" "$GRUB_CONF"; then
-        log "Updating existing GRUB_THEME entry..."
-        # Use # delimiter to avoid path clashes
+        log "Updating active GRUB_THEME..."
         exe sed -i "s|^GRUB_THEME=.*|GRUB_THEME=\"$THEME_PATH\"|" "$GRUB_CONF"
+    
+    # 2. 检查是否存在被注释的 #GRUB_THEME
+    elif grep -q "^#GRUB_THEME=" "$GRUB_CONF"; then
+        log "Uncommenting and setting GRUB_THEME..."
+        exe sed -i "s|^#GRUB_THEME=.*|GRUB_THEME=\"$THEME_PATH\"|" "$GRUB_CONF"
+        
+    # 3. 如果都没有，则追加
     else
-        log "Adding GRUB_THEME entry..."
+        log "Appending GRUB_THEME entry..."
         echo "GRUB_THEME=\"$THEME_PATH\"" >> "$GRUB_CONF"
-        success "Entry appended."
     fi
     
-    # Enable graphical output (Comment out console output)
+    # 图形终端设置
     if grep -q "^GRUB_TERMINAL_OUTPUT=\"console\"" "$GRUB_CONF"; then
         log "Enabling graphical terminal..."
         exe sed -i 's/^GRUB_TERMINAL_OUTPUT="console"/#GRUB_TERMINAL_OUTPUT="console"/' "$GRUB_CONF"
     fi
     
-    # Ensure GFXMODE is Auto
     if ! grep -q "^GRUB_GFXMODE=" "$GRUB_CONF"; then
         echo 'GRUB_GFXMODE=auto' >> "$GRUB_CONF"
     fi
