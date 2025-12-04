@@ -270,6 +270,22 @@ for module in "${MODULES[@]}"; do
     fi
 done
 
+# ------------------------------------------------------------------------------
+# Final Cleanup (KISS Principle)
+# ------------------------------------------------------------------------------
+section "Completion" "Cleanup"
+
+# Logic: Only delete if the standard /root path exists.
+# If running as a normal user (cloned in ~), this does nothing (safer).
+if [ -d "/root/shorin-arch-setup" ]; then
+    log "Removing installer from /root..."
+    # Move to root to avoid 'cannot remove current directory' error
+    cd /
+    rm -rfv /root/shorin-arch-setup
+else
+    log "Cleanup skipped (Repository not found in /root/shorin-arch-setup)."
+    log "If you cloned this manually, please remove the folder yourself."
+fi
 # --- Completion ---
 clear
 show_banner
@@ -296,22 +312,7 @@ if [ -n "$FINAL_USER" ]; then
     echo -e "   ${H_BLUE}●${NC} Log Saved     : ${BOLD}$FINAL_DOCS/log-shorin-arch-setup.txt${NC}"
 fi
 
-# ------------------------------------------------------------------------------
-# Final Cleanup (KISS Principle)
-# ------------------------------------------------------------------------------
-section "Completion" "Cleanup"
 
-# Logic: Only delete if the standard /root path exists.
-# If running as a normal user (cloned in ~), this does nothing (safer).
-if [ -d "/root/shorin-arch-setup" ]; then
-    log "Removing installer from /root..."
-    # Move to root to avoid 'cannot remove current directory' error
-    cd /
-    rm -rfv /root/shorin-arch-setup
-else
-    log "Cleanup skipped (Repository not found in /root/shorin-arch-setup)."
-    log "If you cloned this manually, please remove the folder yourself."
-fi
 
 # --- Reboot Countdown ---
 echo ""
