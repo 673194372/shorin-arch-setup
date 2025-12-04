@@ -198,19 +198,11 @@ if [ -f "$LIST_FILE" ]; then
         # Phase 1: Batch Install (Repository Packages)
         if [ -n "$BATCH_LIST" ]; then
             log "Batch Install..."
-            # [UPDATE] Ensuring -Syu
-            if ! exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST; then
-                warn "Batch failed. Retrying..."
-                if runuser -u "$TARGET_USER" -- git config --global --get url."https://gitclone.com/github.com/".insteadOf > /dev/null; then
-                    runuser -u "$TARGET_USER" -- git config --global --unset url."https://gitclone.com/github.com/".insteadOf
-                else
-                    runuser -u "$TARGET_USER" -- git config --global url."https://gitclone.com/github.com/".insteadOf "https://github.com/"
-                fi
-                if ! exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST; then
-                    error "Batch failed."
-                else
-                    success "Batch installed."
-                fi
+            # [UPDATE] Ensuring -Syu, Removed GOPROXY
+            if ! exe runuser -u "$TARGET_USER" -- yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST; then
+                warn "Batch failed. Proceeding to individual install..."
+            else
+                success "Batch installed."
             fi
         fi
 
@@ -220,31 +212,19 @@ if [ -f "$LIST_FILE" ]; then
             for git_pkg in "${GIT_LIST[@]}"; do
                 log "Installing '$git_pkg' (Network Build)..."
                 
-                # [UPDATE] Ensuring -Syu
-                if exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
+                # [UPDATE] Ensuring -Syu, Removed GOPROXY
+                if exe runuser -u "$TARGET_USER" -- yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
                     success "Installed $git_pkg (Built from source)."
                 else
                     warn "Network build failed for '$git_pkg'."
-                    warn "Retrying with mirror toggle..."
                     
-                    if runuser -u "$TARGET_USER" -- git config --global --get url."https://gitclone.com/github.com/".insteadOf > /dev/null; then
-                        runuser -u "$TARGET_USER" -- git config --global --unset url."https://gitclone.com/github.com/".insteadOf
+                    # --- Fallback: Try Local Cache ---
+                    warn "Network failed. Attempting local fallback for '$git_pkg'..."
+                    if install_local_fallback "$git_pkg"; then
+                        warn "INSTALLED FROM LOCAL CACHE. If '$git_pkg' fails to launch, you must rebuild it manually."
                     else
-                        runuser -u "$TARGET_USER" -- git config --global url."https://gitclone.com/github.com/".insteadOf "https://github.com/"
-                    fi
-
-                    # [UPDATE] Ensuring -Syu
-                    if exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
-                        success "Installed $git_pkg (Built from source - Retry)."
-                    else
-                        # --- Fallback: Try Local Cache ---
-                        warn "Network failed. Attempting local fallback for '$git_pkg'..."
-                        if install_local_fallback "$git_pkg"; then
-                            warn "INSTALLED FROM LOCAL CACHE. If '$git_pkg' fails to launch, you must rebuild it manually."
-                        else
-                            error "Failed to install '$git_pkg' (Both Network and Local failed)."
-                            FAILED_PACKAGES+=("$git_pkg")
-                        fi
+                        error "Failed to install '$git_pkg' (Both Network and Local failed)."
+                        FAILED_PACKAGES+=("$git_pkg")
                     fi
                 fi
             done
@@ -283,13 +263,7 @@ rm -rf "$TEMP_DIR"
 
 log "Cloning..."
 if ! exe runuser -u "$TARGET_USER" -- git clone "$REPO_URL" "$TEMP_DIR"; then
-    warn "Retrying clone..."
-    if runuser -u "$TARGET_USER" -- git config --global --get url."https://gitclone.com/github.com/".insteadOf > /dev/null; then
-        runuser -u "$TARGET_USER" -- git config --global --unset url."https://gitclone.com/github.com/".insteadOf
-    else
-        runuser -u "$TARGET_USER" -- git config --global url."https://gitclone.com/github.com/".insteadOf "https://github.com/"
-    fi
-    if ! exe runuser -u "$TARGET_USER" -- git clone "$REPO_URL" "$TEMP_DIR"; then error "Clone failed."; fi
+    error "Clone failed."
 fi
 
 if [ -d "$TEMP_DIR/dotfiles" ]; then
@@ -377,8 +351,7 @@ success "Tools configured."
 # ------------------------------------------------------------------------------
 section "Step 9/9" "Cleanup"
 rm -f "$SUDO_TEMP_FILE"
-runuser -u "$TARGET_USER" -- git config --global --unset url."https://gitclone.com/github.com/".insteadOf
-sed -i '/GOPROXY=https:\/\/goproxy.cn,direct/d' /etc/environment
+# [REMOVED] GOPROXY sed command
 success "Done."
 
 # ------------------------------------------------------------------------------
