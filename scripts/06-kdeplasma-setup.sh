@@ -109,6 +109,12 @@ if [ "$IS_CN_ENV" = true ]; then
     # Use utility function
     select_flathub_mirror
 
+    exe flatpak remote-modify --no-p2p flathub
+    
+    export GOPROXY=https://goproxy.cn,direct
+    if ! grep -q "GOPROXY" /etc/environment; then echo "GOPROXY=https://goproxy.cn,direct" >> /etc/environment; fi
+    
+    # [REMOVED] git config proxy setting
     
     success "Optimizations Enabled."
 else
@@ -121,7 +127,7 @@ echo "$TARGET_USER ALL=(ALL) NOPASSWD: ALL" > "$SUDO_TEMP_FILE"
 chmod 440 "$SUDO_TEMP_FILE"
 
 # ------------------------------------------------------------------------------
-# 3. Install Dependencies (Logic: Network First -> Retry -> Local Fallback)
+# 3. Install Dependencies (Logic: Network First -> Local Fallback)
 # ------------------------------------------------------------------------------
 section "Step 3/5" "KDE Dependencies"
 
@@ -142,17 +148,8 @@ if [ -f "$LIST_FILE" ]; then
             log "Batch Install..."
             # [UPDATE] Ensuring -Syu
             if ! exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST; then
-                warn "Batch failed. Retrying with mirror toggle..."
-                if runuser -u "$TARGET_USER" -- git config --global --get url."https://gitclone.com/github.com/".insteadOf > /dev/null; then
-                    runuser -u "$TARGET_USER" -- git config --global --unset url."https://gitclone.com/github.com/".insteadOf
-                else
-                    runuser -u "$TARGET_USER" -- git config --global url."https://gitclone.com/github.com/".insteadOf "https://github.com/"
-                fi
-                if ! exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST; then
-                    error "Batch failed."
-                else
-                    success "Batch installed (on retry)."
-                fi
+                warn "Batch failed. Proceeding to individual install..."
+                # [REMOVED] Retry with mirror toggle
             fi
         fi
 
@@ -168,27 +165,16 @@ if [ -f "$LIST_FILE" ]; then
                 if exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
                     success "Installed $git_pkg"
                 else
-                    warn "Network install failed for $git_pkg. Retrying with mirror toggle..."
-                    
-                    # 2. Retry with Mirror Toggle
-                    if runuser -u "$TARGET_USER" -- git config --global --get url."https://gitclone.com/github.com/".insteadOf > /dev/null; then
-                        runuser -u "$TARGET_USER" -- git config --global --unset url."https://gitclone.com/github.com/".insteadOf
-                    else
-                        runuser -u "$TARGET_USER" -- git config --global url."https://gitclone.com/github.com/".insteadOf "https://github.com/"
-                    fi
+                    warn "Network install failed for $git_pkg."
+                    # [REMOVED] Retry with mirror toggle
 
-                    # [UPDATE] Ensuring -Syu
-                    if exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
-                        success "Installed $git_pkg (on retry)."
+                    # 2. Final Fallback: Local Cache
+                    warn "Network failed. Attempting local fallback for '$git_pkg'..."
+                    if install_local_fallback "$git_pkg"; then
+                        warn "INSTALLED FROM LOCAL CACHE. Rebuild recommended later."
                     else
-                        # 3. Final Fallback: Local Cache
-                        warn "Network failed. Attempting local fallback for '$git_pkg'..."
-                        if install_local_fallback "$git_pkg"; then
-                            warn "INSTALLED FROM LOCAL CACHE. Rebuild recommended later."
-                        else
-                            error "Failed to install '$git_pkg' after all attempts."
-                            FAILED_PACKAGES+=("$git_pkg")
-                        fi
+                        error "Failed to install '$git_pkg' after all attempts."
+                        FAILED_PACKAGES+=("$git_pkg")
                     fi
                 fi
             done
@@ -200,6 +186,7 @@ if [ -f "$LIST_FILE" ]; then
             REPORT_FILE="$DOCS_DIR/安装失败的软件.txt"
             if [ ! -d "$DOCS_DIR" ]; then runuser -u "$TARGET_USER" -- mkdir -p "$DOCS_DIR"; fi
             
+            # Append timestamp header
             echo "--- Installation Failed Report $(date) ---" >> "$REPORT_FILE"
             printf "%s\n" "${FAILED_PACKAGES[@]}" >> "$REPORT_FILE"
             echo "" >> "$REPORT_FILE"
@@ -268,28 +255,6 @@ log "Deploying desktop resources..."
 SOURCE_README="$PARENT_DIR/resources/KDE-README.txt"
 DESKTOP_DIR="$HOME_DIR/Desktop"
 
-# Ensure Desktop exists (Create as user)
-if [ ! -d "$DESKTOP_DIR" ]; then
-    exe runuser -u "$TARGET_USER" -- mkdir -p "$DESKTOP_DIR"
-fi
-
-if [ -f "$SOURCE_README" ]; then
-    log "Copying KDE-README.txt to Desktop..."
-    exe cp "$SOURCE_README" "$DESKTOP_DIR/"
-    exe chown "$TARGET_USER:$TARGET_USER" "$DESKTOP_DIR/KDE-README.txt"
-    success "Readme deployed."
-else
-    warn "resources/KDE-README.txt not found. Skipping."
-fi
-
-# ------------------------------------------------------------------------------
-# 4.5 Deploy Resource Files (README)
-# ------------------------------------------------------------------------------
-log "Deploying desktop resources..."
-
-SOURCE_README="$PARENT_DIR/resources/KDE-README.txt"
-DESKTOP_DIR="$HOME_DIR/Desktop"
-
 if [ ! -d "$DESKTOP_DIR" ]; then
     exe runuser -u "$TARGET_USER" -- mkdir -p "$DESKTOP_DIR"
 fi
@@ -325,7 +290,7 @@ success "SDDM enabled. Will start on reboot."
 # ------------------------------------------------------------------------------
 section "Cleanup" "Restoring State"
 rm -f "$SUDO_TEMP_FILE"
-runuser -u "$TARGET_USER" -- git config --global --unset url."https://gitclone.com/github.com/".insteadOf
+# [REMOVED] git config unset
 sed -i '/GOPROXY=https:\/\/goproxy.cn,direct/d' /etc/environment
 success "Done."
 
