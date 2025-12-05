@@ -197,7 +197,7 @@ if [[ "$CURRENT_TZ" == *"Shanghai"* ]]; then
     
     if [[ "$choice" =~ ^[Yy]$ ]]; then
         log "Running Reflector for China..."
-        if exe reflector $REFLECTOR_ARGS -c China; then
+        if exe reflector $REFLECTOR_ARGS -c cn; then
             success "Mirrors updated."
         else
             warn "Reflector failed. Continuing with existing mirrors."
