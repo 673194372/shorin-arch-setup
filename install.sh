@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# Shorin Arch Setup - Main Installer (v4.0)
+# Shorin Arch Setup - Main Installer (v4.1)
 # ==============================================================================
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -79,7 +79,7 @@ show_banner() {
         2) banner3 ;;
     esac
     echo -e "${NC}"
-    echo -e "${DIM}   :: Arch Linux Automation Protocol :: v4.0 ::${NC}"
+    echo -e "${DIM}   :: Arch Linux Automation Protocol :: v4.1 ::${NC}"
     echo ""
 }
 
@@ -162,6 +162,10 @@ if [ "$DESKTOP_ENV" == "niri" ]; then
 elif [ "$DESKTOP_ENV" == "kde" ]; then
     BASE_MODULES+=("06-kdeplasma-setup.sh")
 fi
+
+# [NEW] Insert Cleanup BEFORE GRUB Theme
+# This ensures we clean up installation snapshots before finalizing the bootloader
+BASE_MODULES+=("06-post-install-cleanup.sh")
 
 BASE_MODULES+=("07-grub-theme.sh" "99-apps.sh")
 MODULES=("${BASE_MODULES[@]}")
