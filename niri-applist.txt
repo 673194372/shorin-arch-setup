@@ -32,7 +32,7 @@ qt6ct
 qt5ct
 nwg-look
 swayosd
-AUR:xwayland-satellite-git
+xwayland-satellite
 AUR:waybar-niri-taskbar-git
 AUR:waybar-module-pacman-updates-git
 AUR:wlogout
