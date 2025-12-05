@@ -400,9 +400,9 @@ rm -rf "$TEMP_DIR"
 # STEP 8: Hardware Tools
 # ==============================================================================
 section "Step 7/9" "Hardware"
-exe runuser -u "$TARGET_USER" -- yay -Syu --noconfirm --needed ddcutil-service
+# exe runuser -u "$TARGET_USER" -- yay -Syu --noconfirm --needed ddcutil-service
 gpasswd -a "$TARGET_USER" i2c
-exe pacman -Syu --noconfirm --needed swayosd
+# exe pacman -Syu --noconfirm --needed swayosd
 systemctl enable --now swayosd-libinput-backend.service > /dev/null 2>&1
 success "Tools configured."
 
