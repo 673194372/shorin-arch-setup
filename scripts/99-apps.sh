@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# 99-apps.sh - Common Applications (Batch Yay + Individual Flatpak + No Retry)
+# 99-apps.sh - Common Applications (TUI Selection + Batch Yay + Individual Flatpak)
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,12 +10,18 @@ source "$SCRIPT_DIR/00-utils.sh"
 
 check_root
 
+# Ensure whiptail is installed for TUI
+if ! command -v whiptail &> /dev/null; then
+    echo "Installing dependency: whiptail (libnewt)..."
+    pacman -S --noconfirm libnewt >/dev/null 2>&1
+fi
+
 trap 'echo -e "\n   ${H_YELLOW}>>> Operation cancelled by user (Ctrl+C). Skipping...${NC}"' INT
 
 # ------------------------------------------------------------------------------
 # 0. Identify Target User
 # ------------------------------------------------------------------------------
-section "Phase 5" "Common Applications"
+section "Phase 5" "Common Applications (TUI Selection)"
 
 log "Identifying target user..."
 DETECTED_USER=$(awk -F: '$3 == 1000 {print $1}' /etc/passwd)
@@ -29,63 +35,104 @@ HOME_DIR="/home/$TARGET_USER"
 info_kv "Target" "$TARGET_USER"
 
 # ------------------------------------------------------------------------------
-# 1. List Selection & Confirmation
+# 1. Parse App List & Build TUI Menu
 # ------------------------------------------------------------------------------
 if [ "$DESKTOP_ENV" == "kde" ]; then
     LIST_FILENAME="kde-common-applist.txt"
 else
     LIST_FILENAME="common-applist.txt"
 fi
-
-echo ""
-echo -e "   Selected List: ${BOLD}$LIST_FILENAME${NC} (Based on $DESKTOP_ENV)"
-echo -e "   Format: ${DIM}lines starting with 'flatpak:' use Flatpak, others use Yay.${NC}"
-echo -e "   ${H_YELLOW}Tip: Press Ctrl+C to cancel current operation.${NC}"
-echo ""
-
-read -t 60 -p "$(echo -e "   ${H_CYAN}Install these applications? [Y/n] (Default Y in 60s): ${NC}")" choice
-if [ $? -ne 0 ]; then echo ""; fi
-
-choice=${choice:-Y}
-
-if [[ ! "$choice" =~ ^[Yy]$ ]]; then
-    log "Skipping application installation."
-    trap - INT
-    exit 0
-fi
-
-# ------------------------------------------------------------------------------
-# 2. Parse App List
-# ------------------------------------------------------------------------------
-log "Parsing application list..."
-
 LIST_FILE="$PARENT_DIR/$LIST_FILENAME"
-YAY_APPS=()
-FLATPAK_APPS=()
-FAILED_PACKAGES=()
 
-if [ -f "$LIST_FILE" ]; then
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        line=$(echo "$line" | tr -d '\r' | xargs)
-        [[ -z "$line" || "$line" =~ ^# ]] && continue
-        
-        if [[ "$line" == flatpak:* ]]; then
-            app_id="${line#flatpak:}"
-            FLATPAK_APPS+=("$app_id")
-        else
-            YAY_APPS+=("$line")
-        fi
-    done < "$LIST_FILE"
-    
-    info_kv "Total Found" "Yay: ${#YAY_APPS[@]}" "Flatpak: ${#FLATPAK_APPS[@]}"
-else
+if [ ! -f "$LIST_FILE" ]; then
     warn "File $LIST_FILENAME not found. Skipping."
     trap - INT
     exit 0
 fi
 
+# Prepare arrays for Whiptail
+# Format: "Tag" "Item Description" "Status(ON/OFF)"
+CHOICE_ARGS=()
+
+log "Reading $LIST_FILENAME..."
+
+while IFS= read -r line || [[ -n "$line" ]]; do
+    line=$(echo "$line" | tr -d '\r' | xargs)
+    # Skip comments and empty lines
+    [[ -z "$line" || "$line" =~ ^# ]] && continue
+    
+    # Determine type for description
+    if [[ "$line" == flatpak:* ]]; then
+        pkg_name="${line#flatpak:}"
+        desc="[Flatpak] $pkg_name"
+    else
+        pkg_name="$line"
+        desc="[Yay/Repo] $pkg_name"
+    fi
+    
+    # Add to checklist options (Default: ON)
+    CHOICE_ARGS+=("$line" "$desc" "ON")
+
+done < "$LIST_FILE"
+
+if [ ${#CHOICE_ARGS[@]} -eq 0 ]; then
+    warn "No valid applications found in list."
+    trap - INT
+    exit 0
+fi
+
 # ------------------------------------------------------------------------------
-# 3. Install Applications
+# 2. Show TUI & Get User Selection
+# ------------------------------------------------------------------------------
+echo "Launching selection menu..."
+
+# whiptail returns the selected tags as a string: "pkg1" "flatpak:pkg2" ...
+# We direct stderr to stdout (2>&1) and stdout to var to capture the result
+SELECTION_STR=$(whiptail --title "App Selection ($DESKTOP_ENV)" \
+                         --checklist "Select applications to install:\n(Space: Toggle, Tab: Switch, Enter: Confirm)" \
+                         20 80 10 \
+                         "${CHOICE_ARGS[@]}" \
+                         3>&1 1>&2 2>&3)
+
+exit_status=$?
+
+if [ $exit_status -ne 0 ]; then
+    log "User cancelled the selection. Exiting."
+    trap - INT
+    exit 0
+fi
+
+if [ -z "$SELECTION_STR" ]; then
+    log "No applications selected."
+    trap - INT
+    exit 0
+fi
+
+# ------------------------------------------------------------------------------
+# 3. Categorize Selection (Yay vs Flatpak)
+# ------------------------------------------------------------------------------
+log "Processing selection..."
+
+YAY_APPS=()
+FLATPAK_APPS=()
+FAILED_PACKAGES=()
+
+# Remove quotes from the result string (whiptail output format is "item1" "item2")
+eval "SELECTED_ARRAY=($SELECTION_STR)"
+
+for item in "${SELECTED_ARRAY[@]}"; do
+    if [[ "$item" == flatpak:* ]]; then
+        app_id="${item#flatpak:}"
+        FLATPAK_APPS+=("$app_id")
+    else
+        YAY_APPS+=("$item")
+    fi
+done
+
+info_kv "Scheduled" "Yay: ${#YAY_APPS[@]}" "Flatpak: ${#FLATPAK_APPS[@]}"
+
+# ------------------------------------------------------------------------------
+# 4. Install Applications
 # ------------------------------------------------------------------------------
 
 # --- A. Install Yay Apps (BATCH MODE) ---
@@ -125,7 +172,7 @@ if [ ${#YAY_APPS[@]} -gt 0 ]; then
         
         rm -f "$SUDO_TEMP_FILE"
     else
-        log "All Yay packages are already installed."
+        log "All selected Yay packages are already installed."
     fi
 fi
 
@@ -152,7 +199,7 @@ if [ ${#FLATPAK_APPS[@]} -gt 0 ]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 3.5 Generate Failure Report
+# 5. Generate Failure Report
 # ------------------------------------------------------------------------------
 if [ ${#FAILED_PACKAGES[@]} -gt 0 ]; then
     DOCS_DIR="$HOME_DIR/Documents"
@@ -172,7 +219,7 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 4. Steam Locale Fix
+# 6. Steam Locale Fix
 # ------------------------------------------------------------------------------
 section "Post-Install" "Game Environment Tweaks"
 
