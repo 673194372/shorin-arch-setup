@@ -6,8 +6,5 @@ DefaultProfile=配置方案 1.profile
 [General]
 ConfigVersion=1
 
-[KonsoleWindow]
-RemoveWindowTitleBarAndFrame=true
-
 [UiSettings]
 ColorScheme=
