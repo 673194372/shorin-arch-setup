@@ -3,7 +3,6 @@ firefox                                  # Web Browser (Mozilla)
 kitty                                    # Terminal Emulator (GPU Accelerated)
 neovim                                   # Hyperextensible Vim-based text editor
 imv                                      # Image Viewer for Wayland
-mission-center                           # System Monitor (Task Manager style)
 fish                                     # Friendly Interactive Shell
 
 # --- Niri/Wayland Components ---
