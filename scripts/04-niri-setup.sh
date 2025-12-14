@@ -60,13 +60,16 @@ critical_failure_handler() {
     echo -e "\033[0;31m#   Reason: $failed_reason                                     #\033[0m"
     echo -e "\033[0;31m#   Status: System might be in an inconsistent state.          #\033[0m"
     echo -e "\033[0;31m#                                                              #\033[0m"
-    echo -e "\033[0;31m#   Would you like to restore snapshot (undo changes)?         #\033[0m"
+    echo -e "\033[0;31m#   OPTIONS:                                                   #\033[0m"
+    echo -e "\033[0;31m#   1. Restore snapshot (Undo changes)                         #\033[0m"
+    echo -e "\033[0;31m#   2. Fix the issue manually and re-run: sudo bash install.sh #\033[0m"
+    echo -e "\033[0;31m#                                                              #\033[0m"
     echo -e "\033[0;31m################################################################\033[0m"
     echo ""
 
     while true; do
         # No default option (-p prompt only)
-        read -p "Execute System Recovery? [y/n]: " -r choice
+        read -p "Execute System Recovery (Restore Snapshot)? [y/n]: " -r choice
         case "$choice" in 
             [yY][eE][sS]|[yY]) 
                 if [ -f "$UNDO_SCRIPT" ]; then
@@ -80,12 +83,13 @@ critical_failure_handler() {
                 fi
                 ;;
             [nN][oO]|[nN])
-                warn "User chose NOT to recover. System might be in a broken state."
+                warn "User chose NOT to recover."
+                warn "You can fix the error and re-run 'sudo bash install.sh'."
                 error "Installation aborted."
                 exit 1
                 ;;
             *)
-                echo -e "\033[1;33mInvalid input. Please enter 'y' to recover or 'n' to abort.\033[0m"
+                echo -e "\033[1;33mInvalid input. Please enter 'y' to recover or 'n' to abort/retry manually.\033[0m"
                 ;;
         esac
     done
@@ -362,7 +366,7 @@ else
 fi
 
 # ==============================================================================
-# STEP 6: Dotfiles
+# STEP 6: Dotfiles (Modified Logic)
 # ==============================================================================
 section "Step 5/9" "Deploying Dotfiles"
 
@@ -370,82 +374,90 @@ REPO_GITHUB="https://github.com/SHORiN-KiWATA/ShorinArchExperience-ArchlinuxGuid
 REPO_GITEE="https://gitee.com/shorinkiwata/ShorinArchExperience-ArchlinuxGuide.git"
 TEMP_DIR="/tmp/shorin-repo"
 
+# 1. Clean previous temp
 rm -rf "$TEMP_DIR"
 log "Cloning configuration repository..."
 
-# Attempt 1: GitHub
+# 2. Clone Repository
 if runuser -u "$TARGET_USER" -- git clone "$REPO_GITHUB" "$TEMP_DIR"; then
     success "Cloned successfully (Source: GitHub)."
 else
     warn "GitHub clone failed. Attempting fallback to Gitee..."
     rm -rf "$TEMP_DIR"
     
-    # Attempt 2: Gitee
     if runuser -u "$TARGET_USER" -- git clone "$REPO_GITEE" "$TEMP_DIR"; then
         success "Cloned successfully (Source: Gitee)."
     else
         error "Clone failed from both GitHub and Gitee."
-        # Clone failure triggers the handler
         critical_failure_handler "Failed to clone dotfiles from GitHub and Gitee."
     fi
 fi
 
 if [ -d "$TEMP_DIR/dotfiles" ]; then
     # ==============================================================================
-    # 1. PRE-PROCESS: Handle Exclusions & Cleanups (BEFORE Copying)
+    # 2. FILTER: Remove Excluded Folders (IN TEMP DIR)
     # ==============================================================================
-    
-    # 1.1 Remove bookmarks for non-shorin users
-    UID1000_USER=$(id -nu 1000 2>/dev/null)
-    if [ "$UID1000_USER" != "shorin" ]; then
-        rm -f "$TEMP_DIR/dotfiles/.config/gtk-3.0/bookmarks"
-    fi
-
-    # 1.2 Handle "exclude-dotfiles.txt"
-    # Only run exclusion for non-shorin users
-    if [ "$TARGET_USER" != "shorin" ]; then
-        EXCLUDE_FILE="$PARENT_DIR/exclude-dotfiles.txt"
+    EXCLUDE_FILE="$PARENT_DIR/exclude-dotfiles.txt"
+    if [ -f "$EXCLUDE_FILE" ]; then
+        log "Processing exclusion list (cleaning temp source)..."
         
-        if [ -f "$EXCLUDE_FILE" ]; then
-            log "Processing exclusion list (cleaning temp source)..."
-            mapfile -t EXCLUDES < <(grep -vE "^\s*#|^\s*$" "$EXCLUDE_FILE" | tr -d '\r')
+        # Clean carriage returns and ignore comments
+        mapfile -t EXCLUDES < <(grep -vE "^\s*#|^\s*$" "$EXCLUDE_FILE" | tr -d '\r')
+        
+        for item in "${EXCLUDES[@]}"; do
+            item=$(echo "$item" | xargs) # Trim spaces
+            [ -z "$item" ] && continue
             
-            for item in "${EXCLUDES[@]}"; do
-                item=$(echo "$item" | xargs)
-                [ -z "$item" ] && continue
-                
-                # Delete from the TEMP directory, not HOME
-                RM_PATH="$TEMP_DIR/dotfiles/.config/$item"
-                
-                if [ -e "$RM_PATH" ]; then
-                    log "Excluding: $item"
-                    rm -rf "$RM_PATH"
-                fi
-            done
-        else
-            log "No exclusion file found ($EXCLUDE_FILE), skipping."
-        fi
-        
-        # 1.3 Pre-clean output.kdl (Remove from source so it is not copied)
-        rm -f "$TEMP_DIR/dotfiles/.config/niri/output.kdl"
+            # Target is inside .config/
+            RM_PATH="$TEMP_DIR/dotfiles/.config/$item"
+            
+            if [ -e "$RM_PATH" ]; then
+                log "Excluding (Removing from source): .config/$item"
+                rm -rf "$RM_PATH"
+            else
+                # Debug log if needed, otherwise silent
+                :
+            fi
+        done
+    else
+        log "No exclusion file found ($EXCLUDE_FILE), skipping exclusion filter."
     fi
 
     # ==============================================================================
-    # 2. APPLY: Backup & Copy
+    # 3. APPLY: Backup & Move/Copy
     # ==============================================================================
-
     BACKUP_NAME="config_backup_$(date +%s).tar.gz"
-    log "Backing up..."
+    log "Backing up existing .config..."
     exe runuser -u "$TARGET_USER" -- tar -czf "$HOME_DIR/$BACKUP_NAME" -C "$HOME_DIR" .config
     
-    log "Applying..."
-    # Copy clean files
+    log "Applying dotfiles to $HOME_DIR..."
+    # Copy all files (exclusions are already gone from source)
     exe runuser -u "$TARGET_USER" -- cp -rf "$TEMP_DIR/dotfiles/." "$HOME_DIR/"
 
     # ==============================================================================
-    # 3. POST-PROCESS: Fix Permissions & Symlinks
+    # 4. POST-PROCESS: User-Specific Cleanup (AFTER Copy)
     # ==============================================================================
+    
+    # Check if user is shorin
+    if [ "$TARGET_USER" != "shorin" ]; then
+        log "Non-shorin user detected: Cleaning specific configs..."
+        
+        # 4.1 Clear content of output.kdl (Empty the file)
+        # Assuming path is .config/niri/output.kdl. Adjust if your output file is elsewhere.
+        OUTPUT_KDL="$HOME_DIR/.config/niri/output.kdl"
+        if [ -f "$OUTPUT_KDL" ]; then
+            log "Clearing monitor configuration content..."
+            # Use truncate to empty file size to 0
+            runuser -u "$TARGET_USER" -- truncate -s 0 "$OUTPUT_KDL"
+        fi
 
+        # 4.2 Remove bookmarks
+        rm -f "$HOME_DIR/.config/gtk-3.0/bookmarks"
+    fi
+
+    # ==============================================================================
+    # 5. Fix Permissions & Symlinks
+    # ==============================================================================
     log "Fixing GTK 4.0 symlinks..."
     GTK4_CONF="$HOME_DIR/.config/gtk-4.0"
     THEME_SRC="$HOME_DIR/.themes/adw-gtk3-dark/gtk-4.0"
@@ -462,9 +474,9 @@ if [ -d "$TEMP_DIR/dotfiles" ]; then
         exe runuser -u "$TARGET_USER" -- flatpak override --user --env=GTK_THEME=adw-gtk3-dark
     fi
 
-    success "Applied."
+    success "Dotfiles Applied."
 else
-    warn "Dotfiles missing."
+    warn "Dotfiles missing in temp directory."
 fi
 
 # ==============================================================================
