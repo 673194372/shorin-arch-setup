@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# 04-niri-setup.sh - Niri Desktop (Robust AUR Retry Version)
+# 04-niri-setup.sh - Niri Desktop (Restored FZF & Robust AUR)
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,7 +25,7 @@ as_user() {
     runuser -u "$TARGET_USER" -- "$@"
 }
 
-# 2. Critical Failure Handler
+# 2. Critical Failure Handler (The "Big Red Box")
 critical_failure_handler() {
     local failed_reason="$1"
     trap - ERR
@@ -68,7 +68,7 @@ critical_failure_handler() {
     done
 }
 
-# 3. Robust Package Installation with Retry Loop (NEW)
+# 3. Robust Package Installation with Retry Loop
 ensure_package_installed() {
     local pkg="$1"
     local context="$2" # e.g., "Repo" or "AUR"
@@ -85,7 +85,7 @@ ensure_package_installed() {
     while [ $attempt -le $max_attempts ]; do
         if [ $attempt -gt 1 ]; then
              warn "Retrying '$pkg' ($context)... (Attempt $attempt/$max_attempts)"
-             sleep 3 # Cooldown to let network recover
+             sleep 3 # Cooldown
         else
              log "Installing '$pkg' ($context)..."
         fi
@@ -223,7 +223,7 @@ echo "$TARGET_USER ALL=(ALL) NOPASSWD: ALL" > "$SUDO_TEMP_FILE"
 chmod 440 "$SUDO_TEMP_FILE"
 
 # ==============================================================================
-# STEP 5: Dependencies
+# STEP 5: Dependencies (RESTORED FZF)
 # ==============================================================================
 section "Step 4/9" "Dependencies"
 LIST_FILE="$PARENT_DIR/niri-applist.txt"
@@ -239,22 +239,51 @@ if [ -f "$LIST_FILE" ]; then
         PACKAGE_ARRAY=()
     else
         echo -e "\n   ${H_YELLOW}>>> Default installation in 60s. Press ANY KEY to customize...${NC}"
+        
         if read -t 60 -n 1 -s -r; then
-            # FZF Selection Logic
+            # --- [RESTORED] Original FZF Selection Logic ---
             clear
             log "Loading package list..."
-            SELECTED_LINES=$(grep -vE "^\s*#|^\s*$" "$LIST_FILE" | sed -E 's/[[:space:]]+#/\t#/' | \
-                fzf --multi --layout=reverse --border --prompt="Search > " --delimiter=$'\t' --with-nth=1 --preview "echo {} | cut -f2 -d$'\t'")
+            
+            SELECTED_LINES=$(grep -vE "^\s*#|^\s*$" "$LIST_FILE" | \
+                sed -E 's/[[:space:]]+#/\t#/' | \
+                fzf --multi \
+                    --layout=reverse \
+                    --border \
+                    --margin=1,2 \
+                    --prompt="Search Pkg > " \
+                    --pointer=">>" \
+                    --marker="* " \
+                    --delimiter=$'\t' \
+                    --with-nth=1 \
+                    --bind 'load:select-all' \
+                    --bind 'ctrl-a:select-all,ctrl-d:deselect-all' \
+                    --info=inline \
+                    --header="[TAB] TOGGLE | [ENTER] INSTALL | [CTRL-D] DE-ALL | [CTRL-A] SE-ALL" \
+                    --preview "echo {} | cut -f2 -d$'\t' | sed 's/^# //'" \
+                    --preview-window=right:50%:wrap:border-left \
+                    --color=dark \
+                    --color=fg+:white,bg+:black \
+                    --color=hl:blue,hl+:blue:bold \
+                    --color=header:yellow:bold \
+                    --color=info:magenta \
+                    --color=prompt:cyan,pointer:cyan:bold,marker:green:bold \
+                    --color=spinner:yellow)
             
             clear
-            PACKAGE_ARRAY=()
-            if [ -n "$SELECTED_LINES" ]; then
+
+            if [ -z "$SELECTED_LINES" ]; then
+                warn "User cancelled selection. Installing NOTHING."
+                PACKAGE_ARRAY=()
+            else
+                PACKAGE_ARRAY=()
                 while IFS= read -r line; do
-                    clean_pkg=$(echo "$line" | cut -f1 -d$'\t' | xargs)
-                    clean_pkg="${clean_pkg#AUR:}"
+                    raw_pkg=$(echo "$line" | cut -f1 -d$'\t' | xargs)
+                    clean_pkg="${raw_pkg#AUR:}"
                     [ -n "$clean_pkg" ] && PACKAGE_ARRAY+=("$clean_pkg")
                 done <<< "$SELECTED_LINES"
             fi
+            # -----------------------------------------------
         else
             log "Auto-confirming ALL packages."
             PACKAGE_ARRAY=("${DEFAULT_LIST[@]}")
@@ -291,7 +320,6 @@ if [ -f "$LIST_FILE" ]; then
         # 1. Batch Install Repo Packages
         if [ ${#BATCH_LIST[@]} -gt 0 ]; then
             log "Phase 1: Batch Installing Repo Packages..."
-            # Using || true to prevent exit on minor errors, handled by verification
             as_user yay -S --noconfirm --needed --answerdiff=None --answerclean=None "${BATCH_LIST[@]}" || true
             
             # Verify Each
