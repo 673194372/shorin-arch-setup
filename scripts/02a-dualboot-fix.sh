@@ -10,6 +10,14 @@ source "$SCRIPT_DIR/00-utils.sh"
 
 check_root
 
+# --- [NEW] GRUB Installation Check ---
+# 检测是否存在 grub-mkconfig 命令以及配置文件
+# 如果其中任意一个不存在，则认为没安装 GRUB (可能是 systemd-boot 或其他)，直接跳过。
+if ! command -v grub-mkconfig &>/dev/null || [ ! -f "/etc/default/grub" ]; then
+    warn "GRUB is not detected (command or config missing). Skipping GRUB configuration module."
+    exit 0
+fi
+
 # --- Helper Functions for /etc/default/grub ---
 
 # Sets a GRUB key-value pair. Handles commented, existing, and new keys.
@@ -75,11 +83,7 @@ manage_kernel_param() {
 
 section "Phase 2A" "Advanced GRUB & Dual-Boot Configuration"
 
-# Pre-check: Ensure GRUB is actually installed
-if [ ! -f "/etc/default/grub" ]; then
-    warn "GRUB config file (/etc/default/grub) not found. Skipping this module."
-    exit 0
-fi
+# (Original file check removed here since we checked at the very top)
 
 # ------------------------------------------------------------------------------
 # 1. Detect Windows
