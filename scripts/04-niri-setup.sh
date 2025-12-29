@@ -440,69 +440,6 @@ as_user xdg-mime default imv.desktop image/jpeg image/png image/gif image/webp i
 as_user xdg-mime default mpv.desktop video/mp4 video/x-matroska video/webm video/avi video/quicktime
 success "MIME types configured."
 
-# --- [NEW] Virtualization Configuration (Virt-Manager) ---
-if pacman -Qi virt-manager &>/dev/null; then
-  section "Config" "Setting up KVM/QEMU"
-  log "Virt-Manager detected. Installing dependencies..."
-  
-  # 1. 安装完整依赖
-  pacman -S --noconfirm --needed qemu-full virt-manager swtpm dnsmasq
-
-  # 2. 添加用户组 (需要重新登录生效)
-  log "Adding $TARGET_USER to libvirt group..."
-  usermod -a -G libvirt "$TARGET_USER"
-
-  # 3. 开启服务
-  log "Enabling libvirtd service..."
-  systemctl enable --now libvirtd
-
-  # 4. 配置网络 (Default NAT)
-  log "Starting default network..."
-  # 等待几秒确保服务完全启动
-  sleep 3
-  virsh net-start default || warn "Default network might be already active."
-  virsh net-autostart default || true
-  
-  success "Virtualization configured."
-fi
-
-# --- [NEW] Wine Configuration & Fonts ---
-if pacman -Qi wine &>/dev/null; then
-  section "Config" "Setting up Wine & Fonts"
-  log "Wine detected. Installing Mono/Gecko..."
-  
-  # 1. 安装 Gecko 和 Mono
-  pacman -S --noconfirm --needed wine wine-gecko wine-mono
-
-  # 2. 初始化 Wine (使用 wineboot -u 在后台运行，不弹窗)
-  WINE_PREFIX="$HOME_DIR/.wine"
-  if [ ! -d "$WINE_PREFIX" ]; then
-    log "Initializing wine prefix (This may take a while)..."
-    # WINEDLLOVERRIDES禁止弹窗询问
-    as_user wineboot -u
-    # 等待初始化完成
-    as_user wineserver -w
-  else
-    log "Wine prefix already exists."
-  fi
-
-  # 3. 复制字体
-  FONT_SRC="$SCRIPT_DIR/resources/windows-sim-fonts"
-  FONT_DEST="$WINE_PREFIX/drive_c/windows/Fonts"
-
-  if [ -d "$FONT_SRC" ]; then
-    log "Copying Windows fonts from resources..."
-    as_user mkdir -p "$FONT_DEST"
-    cp -r "$FONT_SRC"/* "$FONT_DEST/"
-    # 修复权限
-    chown -R "$TARGET_USER" "$FONT_DEST"
-    success "Wine fonts installed."
-  else
-    warn "Resources font directory not found at: $FONT_SRC"
-  fi
-  
-  success "Wine configured."
-fi
 # ==============================================================================
 # STEP 7: Wallpapers
 # ==============================================================================

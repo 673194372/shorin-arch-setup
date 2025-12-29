@@ -19,7 +19,7 @@ fi
 trap 'echo -e "\n   ${H_YELLOW}>>> Operation cancelled by user (Ctrl+C). Skipping...${NC}"' INT
 
 # ------------------------------------------------------------------------------
-# 0. Identify Target User
+# 0. Identify Target User & Helper
 # ------------------------------------------------------------------------------
 section "Phase 5" "Common Applications"
 
@@ -33,6 +33,11 @@ else
 fi
 HOME_DIR="/home/$TARGET_USER"
 info_kv "Target" "$TARGET_USER"
+
+# Helper function for user commands
+as_user() {
+  runuser -u "$TARGET_USER" -- "$@"
+}
 
 # ------------------------------------------------------------------------------
 # 1. List Selection & User Prompt
@@ -69,9 +74,6 @@ echo -e "   ${H_CYAN}    [N]     = Skip installation${NC}"
 echo -e "   ${H_YELLOW}    [Timeout 60s] = Auto-install ALL default packages (No FZF)${NC}"
 echo ""
 
-# 使用 read -t 60 进行询问
-# 状态码 0 = 用户输入了内容 (或者直接回车)
-# 状态码 >128 = 超时
 read -t 60 -p "   Please select [Y/n]: " choice
 READ_STATUS=$?
 
@@ -79,23 +81,18 @@ SELECTED_RAW=""
 
 # Case 1: Timeout (Auto Install ALL)
 if [ $READ_STATUS -ne 0 ]; then
-    echo "" # 换行，因为超时read不会自动换行
+    echo "" 
     warn "Timeout reached (60s). Auto-installing ALL applications from list..."
-    
-    # 直接读取文件，格式化为与 FZF 输出一致的格式，方便后续处理
-    # 这一步保留了 AUR: 前缀，后续循环会处理它
     SELECTED_RAW=$(grep -vE "^\s*#|^\s*$" "$LIST_FILE" | sed -E 's/[[:space:]]+#/\t#/')
 
 # Case 2: User Input
 else
-    choice=${choice:-Y} # 默认为 Y
+    choice=${choice:-Y}
     if [[ "$choice" =~ ^[nN]$ ]]; then
-        # User chose No
         warn "User skipped application installation."
         trap - INT
         exit 0
     else
-        # User chose Yes -> Enter FZF
         clear
         echo -e "\n  Loading application list..."
         
@@ -139,15 +136,10 @@ fi
 # ------------------------------------------------------------------------------
 log "Processing selection..."
 
-# 注意：此循环负责剥离前缀，确保 SELECTED_RAW 中无论是否包含前缀，
-# 最终进入数组的都是纯净包名。
 while IFS= read -r line; do
-    # 1. Extract Name (Before TAB)
     raw_pkg=$(echo "$line" | cut -f1 -d$'\t' | xargs)
-    
     [[ -z "$raw_pkg" ]] && continue
 
-    # 2. Categorize: Repo / AUR / Flatpak
     if [[ "$raw_pkg" == flatpak:* ]]; then
         clean_name="${raw_pkg#flatpak:}"
         FLATPAK_APPS+=("$clean_name")
@@ -162,8 +154,7 @@ done <<< "$SELECTED_RAW"
 info_kv "Scheduled" "Repo: ${#REPO_APPS[@]}" "AUR: ${#AUR_APPS[@]}" "Flatpak: ${#FLATPAK_APPS[@]}"
 
 # ------------------------------------------------------------------------------
-# [FIX] GLOBAL SUDO CONFIGURATION
-# 配置全局免密，覆盖 Repo 和 AUR 两个阶段
+# [SETUP] GLOBAL SUDO CONFIGURATION
 # ------------------------------------------------------------------------------
 if [ ${#REPO_APPS[@]} -gt 0 ] || [ ${#AUR_APPS[@]} -gt 0 ]; then
     log "Configuring temporary NOPASSWD for installation..."
@@ -193,7 +184,7 @@ if [ ${#REPO_APPS[@]} -gt 0 ]; then
         BATCH_LIST="${REPO_QUEUE[*]}"
         info_kv "Installing" "${#REPO_QUEUE[@]} packages via Pacman/Yay"
         
-        if ! exe runuser -u "$TARGET_USER" -- yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST; then
+        if ! exe as_user yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST; then
             error "Batch installation failed. Some repo packages might be missing."
             for pkg in "${REPO_QUEUE[@]}"; do
                 FAILED_PACKAGES+=("repo:$pkg")
@@ -226,8 +217,7 @@ if [ ${#AUR_APPS[@]} -gt 0 ]; then
                 sleep 3
             fi
             
-            # Using runuser to run yay as target user
-            if runuser -u "$TARGET_USER" -- yay -S --noconfirm --needed --answerdiff=None --answerclean=None "$app"; then
+            if as_user yay -S --noconfirm --needed --answerdiff=None --answerclean=None "$app"; then
                 install_success=true
                 success "Installed $app"
                 break
@@ -241,15 +231,6 @@ if [ ${#AUR_APPS[@]} -gt 0 ]; then
             FAILED_PACKAGES+=("aur:$app")
         fi
     done
-fi
-
-# ------------------------------------------------------------------------------
-# [FIX] CLEANUP GLOBAL SUDO CONFIGURATION
-# 所有 Yay/Pacman 操作完成后，删除免密文件
-# ------------------------------------------------------------------------------
-if [ -f "$SUDO_TEMP_FILE" ]; then
-    log "Revoking temporary NOPASSWD..."
-    rm -f "$SUDO_TEMP_FILE"
 fi
 
 # --- C. Install Flatpak Apps (INDIVIDUAL MODE) ---
@@ -273,38 +254,75 @@ if [ ${#FLATPAK_APPS[@]} -gt 0 ]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 3.5 Generate Failure Report
+# 4. Environment & Additional Configs (Virt/Wine/Steam)
 # ------------------------------------------------------------------------------
-if [ ${#FAILED_PACKAGES[@]} -gt 0 ]; then
-    DOCS_DIR="$HOME_DIR/Documents"
-    REPORT_FILE="$DOCS_DIR/安装失败的软件.txt"
-    
-    if [ ! -d "$DOCS_DIR" ]; then runuser -u "$TARGET_USER" -- mkdir -p "$DOCS_DIR"; fi
-    
-    # Append header and list to report
-    echo -e "\n========================================================" >> "$REPORT_FILE"
-    echo -e " Installation Failure Report - $(date)" >> "$REPORT_FILE"
-    echo -e "========================================================" >> "$REPORT_FILE"
-    printf "%s\n" "${FAILED_PACKAGES[@]}" >> "$REPORT_FILE"
-    
-    chown "$TARGET_USER:$TARGET_USER" "$REPORT_FILE"
-    
-    echo ""
-    warn "Some applications failed to install."
-    warn "A report has been saved to:"
-    echo -e "   ${BOLD}$REPORT_FILE${NC}"
-else
-    success "All scheduled applications processed successfully."
+section "Post-Install" "System & App Tweaks"
+
+# --- [NEW] Virtualization Configuration (Virt-Manager) ---
+if pacman -Qi virt-manager &>/dev/null; then
+  info_kv "Config" "Virt-Manager detected"
+  
+  # 1. 安装完整依赖
+  log "Installing QEMU/KVM dependencies..."
+  pacman -S --noconfirm --needed qemu-full virt-manager swtpm dnsmasq iptables-nft
+
+  # 2. 添加用户组 (需要重新登录生效)
+  log "Adding $TARGET_USER to libvirt group..."
+  usermod -a -G libvirt "$TARGET_USER"
+
+  # 3. 开启服务
+  log "Enabling libvirtd service..."
+  systemctl enable --now libvirtd
+
+  # 4. 配置网络 (Default NAT)
+  log "Starting default network..."
+  sleep 3
+  virsh net-start default >/dev/null 2>&1 || warn "Default network might be already active."
+  virsh net-autostart default >/dev/null 2>&1 || true
+  
+  success "Virtualization (KVM) configured."
 fi
 
-# ------------------------------------------------------------------------------
-# 4. Steam Locale Fix
-# ------------------------------------------------------------------------------
-section "Post-Install" "Game Environment Tweaks"
+# --- [NEW] Wine Configuration & Fonts ---
+if pacman -Qi wine &>/dev/null; then
+  info_kv "Config" "Wine detected"
+  
+  # 1. 安装 Gecko 和 Mono
+  log "Ensuring Wine Gecko/Mono are installed..."
+  pacman -S --noconfirm --needed wine wine-gecko wine-mono
 
+  # 2. 初始化 Wine (使用 wineboot -u 在后台运行，不弹窗)
+  WINE_PREFIX="$HOME_DIR/.wine"
+  if [ ! -d "$WINE_PREFIX" ]; then
+    log "Initializing wine prefix (This may take a minute)..."
+    # WINEDLLOVERRIDES prohibits popups
+    as_user env WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -u
+    # Wait for completion
+    as_user wineserver -w
+  else
+    log "Wine prefix already exists."
+  fi
+
+  # 3. 复制字体
+  FONT_SRC="$SCRIPT_DIR/resources/windows-sim-fonts"
+  FONT_DEST="$WINE_PREFIX/drive_c/windows/Fonts"
+
+  if [ -d "$FONT_SRC" ]; then
+    log "Copying Windows fonts from resources..."
+    as_user mkdir -p "$FONT_DEST"
+    cp -r "$FONT_SRC"/* "$FONT_DEST/"
+    # 修复权限
+    chown -R "$TARGET_USER:$TARGET_USER" "$FONT_DEST"
+    success "Wine fonts installed."
+  else
+    warn "Resources font directory not found at: $FONT_SRC"
+  fi
+  
+  success "Wine environment configured."
+fi
+
+# --- Steam Locale Fix ---
 STEAM_desktop_modified=false
-
-# Method 1: Native Steam
 NATIVE_DESKTOP="/usr/share/applications/steam.desktop"
 if [ -f "$NATIVE_DESKTOP" ]; then
     log "Checking Native Steam..."
@@ -318,7 +336,6 @@ if [ -f "$NATIVE_DESKTOP" ]; then
     fi
 fi
 
-# Method 2: Flatpak Steam
 if flatpak list | grep -q "com.valvesoftware.Steam"; then
     log "Checking Flatpak Steam..."
     exe flatpak override --env=LANG=zh_CN.UTF-8 com.valvesoftware.Steam
@@ -326,8 +343,36 @@ if flatpak list | grep -q "com.valvesoftware.Steam"; then
     STEAM_desktop_modified=true
 fi
 
-if [ "$STEAM_desktop_modified" = false ]; then
-    log "Steam not found or already configured. Skipping fix."
+# ------------------------------------------------------------------------------
+# [FIX] CLEANUP GLOBAL SUDO CONFIGURATION
+# ------------------------------------------------------------------------------
+if [ -f "$SUDO_TEMP_FILE" ]; then
+    log "Revoking temporary NOPASSWD..."
+    rm -f "$SUDO_TEMP_FILE"
+fi
+
+# ------------------------------------------------------------------------------
+# 5. Generate Failure Report
+# ------------------------------------------------------------------------------
+if [ ${#FAILED_PACKAGES[@]} -gt 0 ]; then
+    DOCS_DIR="$HOME_DIR/Documents"
+    REPORT_FILE="$DOCS_DIR/安装失败的软件.txt"
+    
+    if [ ! -d "$DOCS_DIR" ]; then as_user mkdir -p "$DOCS_DIR"; fi
+    
+    echo -e "\n========================================================" >> "$REPORT_FILE"
+    echo -e " Installation Failure Report - $(date)" >> "$REPORT_FILE"
+    echo -e "========================================================" >> "$REPORT_FILE"
+    printf "%s\n" "${FAILED_PACKAGES[@]}" >> "$REPORT_FILE"
+    
+    chown "$TARGET_USER:$TARGET_USER" "$REPORT_FILE"
+    
+    echo ""
+    warn "Some applications failed to install."
+    warn "A report has been saved to:"
+    echo -e "   ${BOLD}$REPORT_FILE${NC}"
+else
+    success "All scheduled applications processed successfully."
 fi
 
 # Reset Trap
