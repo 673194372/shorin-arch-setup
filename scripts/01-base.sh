@@ -14,7 +14,7 @@ log "Starting Phase 1: Base System Configuration..."
 # ------------------------------------------------------------------------------
 # 1. Set Global Default Editor
 # ------------------------------------------------------------------------------
-section "Step 1/5" "Global Default Editor"
+section "Step 1/6" "Global Default Editor"
 
 TARGET_EDITOR="vim"
 
@@ -45,7 +45,7 @@ success "Global EDITOR set to: ${TARGET_EDITOR}"
 # ------------------------------------------------------------------------------
 # 2. Enable 32-bit (multilib) Repository
 # ------------------------------------------------------------------------------
-section "Step 2/5" "Multilib Repository"
+section "Step 2/6" "Multilib Repository"
 
 if grep -q "^\[multilib\]" /etc/pacman.conf; then
     success "[multilib] is already enabled."
@@ -62,7 +62,7 @@ fi
 # ------------------------------------------------------------------------------
 # 3. Install Base Fonts
 # ------------------------------------------------------------------------------
-section "Step 3/5" "Base Fonts"
+section "Step 3/6" "Base Fonts"
 
 log "Installing adobe-source-han-serif-cn-fonts adobe-source-han-sans-cn-fonts noto-fonts-cjk, noto-fonts, emoji..."
 exe pacman -Syu --noconfirm --needed adobe-source-han-serif-cn-fonts adobe-source-han-sans-cn-fonts noto-fonts-cjk noto-fonts noto-fonts-emoji
@@ -71,7 +71,7 @@ success "Base fonts installed."
 # ------------------------------------------------------------------------------
 # 4. Configure archlinuxcn Repository
 # ------------------------------------------------------------------------------
-section "Step 4/5" "ArchLinuxCN Repository"
+section "Step 4/6" "ArchLinuxCN Repository"
 
 if grep -q "\[archlinuxcn\]" /etc/pacman.conf; then
     success "archlinuxcn repository already exists."
@@ -96,10 +96,11 @@ success "ArchLinuxCN configured."
 # ------------------------------------------------------------------------------
 # 5. Install AUR Helpers
 # ------------------------------------------------------------------------------
-section "Step 5/5" "AUR Helpers"
+section "Step 5/6" "AUR Helpers"
 
 log "Installing yay and paru..."
 exe pacman -Syu --noconfirm --needed base-devel yay paru
 success "Helpers installed."
 
 log "Module 01 completed."
+
