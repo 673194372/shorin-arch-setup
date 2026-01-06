@@ -402,10 +402,21 @@ if [ -d "$TEMP_DIR/dotfiles" ]; then
   as_user tar -czf "$HOME_DIR/config_backup_$(date +%s).tar.gz" -C "$HOME_DIR" .config
   as_user cp -rf "$TEMP_DIR/dotfiles/." "$HOME_DIR/"
 
-  # Post-Process
+# Post-Process
   if [ "$TARGET_USER" != "shorin" ]; then
     as_user truncate -s 0 "$HOME_DIR/.config/niri/output.kdl" 2>/dev/null
-    rm -f "$HOME_DIR/.config/gtk-3.0/bookmarks"
+    
+    # 定义书签文件路径
+    BOOKMARKS_FILE="$HOME_DIR/.config/gtk-3.0/bookmarks"
+    
+    # 如果文件存在，则执行替换操作
+    if [ -f "$BOOKMARKS_FILE" ]; then
+        # 使用 sed 将文件中的 "shorin" 全部替换为当前目标用户名
+        # 使用 as_user 确保文件权限不会变成 root
+        as_user sed -i "s/shorin/$TARGET_USER/g" "$BOOKMARKS_FILE"
+        log "Updated GTK bookmarks path from 'shorin' to '$TARGET_USER'."
+    fi
+    # --- 修改结束 ---
   fi
 
   # Fix Symlinks & Permissions

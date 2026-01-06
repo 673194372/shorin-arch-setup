@@ -3,6 +3,8 @@ steam                                    # Gaming Platform (Valve)
 lutris                                   # Gaming outside steam
 mpv                                      # Minimalist High Performance Video Player
 fragments                                # BitTorrent Client (GNOME style)
+mangohud                                 # OSD tool for gaming (like msi afterburner)
+gamescope                                # gaming conpositor made by Valve
 
 # --- System Utilities ---
 btop                                     # Resource Monitor (TUI)
@@ -24,18 +26,20 @@ gnome-font-viewer                        # manage fonts easily
 gnome-calendar                           # calendar
 gnome-clocks                             # clocks
 gnome-text-editor                        # notebook
-
+localsend                                # send files to other devices
 # --- Wine --- 
 wine                                     # run windows exe 
 
 # --- KVM ---
-virt-manager                             # GUi for KVM qemu virtula machine
+virt-manager                             #  KVM qemu virtula machine
 
 # --- AUR Packages (Social) ---
 AUR:linuxqq-appimage                     # Tencent QQ (AppImage)
 AUR:wechat-appimage                      # WeChat (AppImage)
 AUR:typora-free                          # markdown editor
 AUR:lsfg-vk-bin                          # yellow duck frame generator
+AUR:mangojuice-bin                       # GUI for mangohud
+
 # --- Flatpak Packages (Prefix with flatpak:) ---
 flatpak:it.mijorus.gearlever                     # AppImage Manager (Integrates AppImages)
 flatpak:com.obsproject.Studio            # OBS Studio (Streaming & Recording)
