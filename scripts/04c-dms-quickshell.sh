@@ -63,12 +63,12 @@ if curl -fsSL "$DMS_URL" -o "$INSTALLER_SCRIPT"; then
         # DMS 安装失败不应该导致整个系统安装退出，所以只警告
         warn "DMS installer returned an error code. You may need to install it manually."
     fi
-    
-    runuser -u "$TARGET_USER" -- bash -c "cd ~ && systemctl --user enable dms"
-    # 清理
     rm -f "$INSTALLER_SCRIPT"
 
     SVC_DIR="$HOME_DIR/.config/systemd/user"
+
+    as_user ln -sf "/usr/lib/systemd/user/dms.service" "$SVC_DIR/graphical-session.target.wants/dms.service"
+    
     SVC_FILE="$SVC_DIR/niri-autostart.service"
     LINK="$SVC_DIR/default.target.wants/niri-autostart.service"
 
@@ -95,7 +95,6 @@ EOT
         chown -R "$TARGET_USER" "$SVC_DIR"
         success "Enabled."
     fi
-
 
 else
     warn "Failed to download DMS installer script from $DMS_URL."

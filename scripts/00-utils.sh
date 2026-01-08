@@ -252,3 +252,7 @@ select_flathub_mirror() {
         error "Failed to update mirror."
     fi
 }
+
+as_user() {
+  runuser -u "$TARGET_USER" -- "$@"
+}
