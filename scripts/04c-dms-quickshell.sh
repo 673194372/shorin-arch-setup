@@ -130,7 +130,7 @@ After=graphical-session-pre.target
 StartLimitIntervalSec=60
 StartLimitBurst=3
 [Service]
-ExecStart=/usr/bin/hyprland
+ExecStart=/usr/bin/start-hyprland
 Restart=on-failure
 RestartSec=2
 ExecStartPost=/usr/bin/sleep 0.3
