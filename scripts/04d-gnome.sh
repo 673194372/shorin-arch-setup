@@ -24,8 +24,7 @@ info_kv "Target" "$TARGET_USER"
 # installation
 #=================================================
 log "Installing GNOME ..."
-GNOME_PKGS="gnome-desktop gdm ghostty gnome-control-center gnome-software flatpak file-roller nautilus-python firefox "
-if exe as_user yay -S --noconfirm --needed --answerdiff=None --answerclean=None "$GNOME_PKGS"; then
+if exe as_user yay -S --noconfirm --needed --answerdiff=None --answerclean=None gnome-desktop gdm ghostty gnome-control-center gnome-software flatpak file-roller nautilus-python firefox; then
         log "PKGS intsalled "
 else
         log "Installation failed."
